@@ -23,6 +23,7 @@ data class SettingsUiState(
     val apiKey: String = "",
     val model: String = "claude-haiku-4-5",
     val toneDescription: String = "",
+    val personalFacts: String = "",
     val testResult: String? = null,
     val isTesting: Boolean = false,
     val hasOverlayPermission: Boolean = false,
@@ -56,6 +57,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(toneDescription = tone)
             }
         }
+        viewModelScope.launch {
+            settingsDataStore.personalFacts.collect { facts ->
+                _uiState.value = _uiState.value.copy(personalFacts = facts)
+            }
+        }
     }
 
     fun refreshOverlayPermission() {
@@ -86,6 +92,10 @@ class SettingsViewModel @Inject constructor(
 
     fun updateToneDescription(tone: String) {
         viewModelScope.launch { settingsDataStore.setToneDescription(tone) }
+    }
+
+    fun updatePersonalFacts(facts: String) {
+        viewModelScope.launch { settingsDataStore.setPersonalFacts(facts) }
     }
 
     fun testConnection() {

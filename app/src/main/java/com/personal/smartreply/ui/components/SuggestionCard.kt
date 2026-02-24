@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +38,8 @@ fun SuggestionCard(
     index: Int,
     suggestion: String,
     isStreaming: Boolean = false,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
     onUse: (original: String, edited: String) -> Unit
 ) {
     var editedText by remember(suggestion) { mutableStateOf(suggestion) }
@@ -76,7 +80,8 @@ fun SuggestionCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    enabled = !isRefreshing
                 )
             }
 
@@ -86,21 +91,29 @@ fun SuggestionCard(
             ) {
                 Spacer(modifier = Modifier.weight(1f))
 
-                IconButton(onClick = {
-                    copyToClipboard(context, editedText)
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy"
-                    )
+                IconButton(
+                    onClick = { onRefresh() },
+                    enabled = !isRefreshing && !isStreaming
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "New suggestion"
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                IconButton(onClick = {
-                    copyToClipboard(context, editedText)
-                    onUse(suggestion, editedText)
-                }) {
+                IconButton(
+                    onClick = {
+                        copyToClipboard(context, editedText)
+                        onUse(suggestion, editedText)
+                    },
+                    enabled = !isRefreshing
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Use This"

@@ -84,6 +84,7 @@ class ChatViewModel @Inject constructor(
             val apiKey = settingsDataStore.apiKey.first()
             val model = settingsDataStore.model.first()
             val tone = settingsDataStore.toneDescription.first()
+            val personalFacts = settingsDataStore.personalFacts.first()
 
             if (apiKey.isBlank()) {
                 _uiState.value = _uiState.value.copy(
@@ -106,7 +107,8 @@ class ChatViewModel @Inject constructor(
                     editHistory = editHistory,
                     apiKey = apiKey,
                     model = model,
-                    tone = tone
+                    tone = tone,
+                    personalFacts = personalFacts
                 ).collect { chunk ->
                     fullText.append(chunk)
                     _uiState.value = _uiState.value.copy(streamingText = fullText.toString())

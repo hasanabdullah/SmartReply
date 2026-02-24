@@ -93,12 +93,13 @@ class SmsRepository @Inject constructor(
         val apiKey = settingsDataStore.apiKey.first()
         val model = settingsDataStore.model.first()
         val tone = settingsDataStore.toneDescription.first()
+        val personalFacts = settingsDataStore.personalFacts.first()
 
         if (apiKey.isBlank()) error("API key not set. Go to Settings to add your Claude API key.")
 
         val editHistory = editHistoryRepository.getEditsForPrompt(contactAddress)
         val isGroup = participants.size > 1
-        val systemPrompt = promptBuilder.buildSystemPrompt(tone, isGroup)
+        val systemPrompt = promptBuilder.buildSystemPrompt(tone, isGroup, personalFacts)
         val userPrompt = promptBuilder.buildReplyPrompt(messages, contactName, editHistory, participants)
 
         val request = ClaudeRequest(
@@ -113,6 +114,39 @@ class SmsRepository @Inject constructor(
         promptBuilder.parseSuggestions(text)
     }
 
+    suspend fun suggestSingle(
+        messages: List<SmsMessage>,
+        contactAddress: String,
+        contactName: String?,
+        participants: Map<String, String?> = emptyMap(),
+        category: String
+    ): Result<String> = runCatching {
+        val apiKey = settingsDataStore.apiKey.first()
+        val model = settingsDataStore.model.first()
+        val tone = settingsDataStore.toneDescription.first()
+        val personalFacts = settingsDataStore.personalFacts.first()
+
+        if (apiKey.isBlank()) error("API key not set.")
+
+        val editHistory = editHistoryRepository.getEditsForPrompt(contactAddress)
+        val isGroup = participants.size > 1
+        val systemPrompt = promptBuilder.buildSystemPrompt(tone, isGroup, personalFacts)
+        val userPrompt = promptBuilder.buildSingleReplyPrompt(messages, contactName, editHistory, participants, category)
+
+        val request = ClaudeRequest(
+            model = model,
+            maxTokens = 150,
+            system = systemPrompt,
+            messages = listOf(ClaudeMessage(role = "user", content = userPrompt))
+        )
+
+        val response = claudeApi.createMessage(apiKey, request = request)
+        val text = response.content.firstOrNull()?.text ?: ""
+        val raw = text.trim().removePrefix("1.").removePrefix("2.").removePrefix("3.")
+            .trim().removeSurrounding("\"")
+        promptBuilder.sanitize(raw)
+    }
+
     fun streamReplies(
         messages: List<SmsMessage>,
         contactAddress: String,
@@ -121,10 +155,11 @@ class SmsRepository @Inject constructor(
         apiKey: String,
         model: String,
         tone: String,
+        personalFacts: String = "",
         participants: Map<String, String?> = emptyMap()
     ): Flow<String> {
         val isGroup = participants.size > 1
-        val systemPrompt = promptBuilder.buildSystemPrompt(tone, isGroup)
+        val systemPrompt = promptBuilder.buildSystemPrompt(tone, isGroup, personalFacts)
         val userPrompt = promptBuilder.buildReplyPrompt(messages, contactName, editHistory, participants)
 
         val request = ClaudeRequest(
@@ -144,11 +179,12 @@ class SmsRepository @Inject constructor(
         val apiKey = settingsDataStore.apiKey.first()
         val model = settingsDataStore.model.first()
         val tone = settingsDataStore.toneDescription.first()
+        val personalFacts = settingsDataStore.personalFacts.first()
 
         if (apiKey.isBlank()) error("API key not set. Go to Settings to add your Claude API key.")
 
         val editHistory = editHistoryRepository.getGlobalEdits()
-        val systemPrompt = promptBuilder.buildSystemPrompt(tone)
+        val systemPrompt = promptBuilder.buildSystemPrompt(tone, personalFacts = personalFacts)
         val userPrompt = promptBuilder.buildOpeningPrompt(contactName, context, editHistory)
 
         val request = ClaudeRequest(

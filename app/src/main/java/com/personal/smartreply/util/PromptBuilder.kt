@@ -9,7 +9,7 @@ import javax.inject.Singleton
 @Singleton
 class PromptBuilder @Inject constructor() {
 
-    fun buildSystemPrompt(toneDescription: String, isGroupChat: Boolean = false): String = buildString {
+    fun buildSystemPrompt(toneDescription: String, isGroupChat: Boolean = false, personalFacts: String = ""): String = buildString {
         appendLine("You are a texting assistant. Your job is to suggest replies that match the user's personal texting style.")
         appendLine()
         appendLine("Style guidelines:")
@@ -17,6 +17,15 @@ class PromptBuilder @Inject constructor() {
         appendLine("- Mirror their use of abbreviations, slang, and emoji patterns")
         appendLine("- Keep suggestions natural and conversational — not robotic or overly formal")
         appendLine("- Each suggestion should feel like something the user would actually send")
+        if (personalFacts.isNotBlank()) {
+            appendLine()
+            appendLine("ABOUT THE USER (this is who is sending the messages labeled 'Me'):")
+            appendLine(personalFacts)
+            appendLine()
+            appendLine("IMPORTANT: These facts are about the USER, not about the person they are texting.")
+            appendLine("Do NOT ask the contact questions about the user's own life details.")
+            appendLine("For example, if the user is a software engineer, do NOT suggest asking the contact 'how's the software engineering going?'")
+        }
         if (isGroupChat) {
             appendLine()
             appendLine("This is a GROUP conversation with multiple participants.")
@@ -39,6 +48,16 @@ class PromptBuilder @Inject constructor() {
         appendLine("- Suggestion 2 MUST reference a specific older topic from the conversation history (2 weeks to 1 month back). Look for plans they mentioned, events, problems, goals, trips, etc. If no older context exists, reference the oldest available topic.")
         appendLine("- Suggestion 3 MUST be a thoughtful personal question that shows genuine interest")
         appendLine("- Do not include any other text, explanations, labels, or preamble. Just the 3 numbered suggestions.")
+        appendLine()
+        appendLine("WRITING RULES (strict):")
+        appendLine("- NEVER use em dashes (—), en dashes (–), or double hyphens (--)")
+        appendLine("- NEVER use asterisks (*) for emphasis")
+        appendLine("- NEVER use semicolons (;)")
+        appendLine("- NEVER use ellipsis (...) unless the user's style clearly includes them")
+        appendLine("- Avoid overusing exclamation marks — one per message max, and only if the user's style uses them")
+        appendLine("- Do NOT start messages with 'Hey!' or overly enthusiastic greetings")
+        appendLine("- Do NOT use filler phrases like 'Just wanted to', 'I hope', 'I'd love to', 'Hope all is well'")
+        appendLine("- Write like a real person texting, not like an AI assistant")
     }
 
     fun buildReplyPrompt(
@@ -120,6 +139,68 @@ class PromptBuilder @Inject constructor() {
         appendLine("1. A direct reply to the most recent messages above")
         appendLine("2. A follow-up referencing something specific from earlier in this conversation (ideally 2 weeks to 1 month old)")
         appendLine("3. A genuine personal question about their life, family, work, health, hobbies, etc.")
+    }
+
+    fun buildSingleReplyPrompt(
+        messages: List<SmsMessage>,
+        contactName: String?,
+        editHistory: List<EditHistoryEntity>,
+        participants: Map<String, String?> = emptyMap(),
+        category: String
+    ): String = buildString {
+        val isGroup = participants.size > 1
+        val displayName = if (isGroup) {
+            val names = participants.values.filterNotNull().ifEmpty { participants.keys.toList() }
+            names.joinToString(", ")
+        } else {
+            contactName ?: "this contact"
+        }
+
+        if (editHistory.isNotEmpty()) {
+            appendLine("Here are examples of how the user adjusted previous suggestions (learn from these):")
+            for (edit in editHistory) {
+                appendLine("You suggested: \"${edit.original}\"")
+                appendLine("I changed it to: \"${edit.edited}\"")
+                appendLine()
+            }
+            appendLine("---")
+            appendLine()
+        }
+
+        if (isGroup) {
+            appendLine("Group conversation with: $displayName")
+        } else {
+            appendLine("Conversation with $displayName:")
+        }
+
+        val historySize = messages.size.coerceAtMost(150)
+        val recentMessages = messages.takeLast(historySize)
+
+        var lastDate = 0L
+        for (msg in recentMessages) {
+            val daysBetween = if (lastDate > 0) {
+                TimeUnit.MILLISECONDS.toDays(msg.date - lastDate)
+            } else 0
+
+            if (daysBetween >= 1) {
+                appendLine("--- ${formatGap(daysBetween)} later ---")
+            }
+
+            val sender = if (msg.isFromMe) {
+                "Me"
+            } else if (isGroup) {
+                msg.senderName ?: participants[msg.address] ?: msg.address
+            } else {
+                "Them"
+            }
+            appendLine("$sender: ${msg.body}")
+            lastDate = msg.date
+        }
+
+        appendLine()
+        appendLine("Suggest exactly 1 reply that is: $category")
+        appendLine("Give a different suggestion than what you might have given before. Be creative.")
+        appendLine("Output ONLY the suggestion text, nothing else. No numbering, no quotes, no explanation.")
     }
 
     private fun analyzeConversationGaps(messages: List<SmsMessage>): String? {
@@ -228,6 +309,20 @@ class PromptBuilder @Inject constructor() {
             }
             .filter { it.isNotBlank() }
             .take(3)
+            .map { sanitize(it) }
+    }
+
+    fun sanitize(text: String): String {
+        return text
+            .replace("—", ", ")   // em dash
+            .replace("–", ", ")   // en dash
+            .replace("--", ", ")  // double hyphen
+            .replace(Regex("\\*+([^*]+)\\*+"), "$1")  // *bold* or **bold**
+            .replace(";", ",")    // semicolons
+            .replace(Regex("\\.{3,}"), "")  // ellipsis
+            .replace(Regex(",\\s*,"), ",")  // double commas from replacements
+            .replace(Regex("\\s{2,}"), " ") // collapse extra spaces
+            .trim()
     }
 
     private fun formatGap(days: Long): String = when {

@@ -34,7 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -94,6 +94,7 @@ class OverlayService : Service() {
     private val messages = mutableStateOf<List<SmsMessage>>(emptyList())
     private val suggestions = mutableStateListOf<String>()
     private val isLoading = mutableStateOf(false)
+    private val refreshingIndex = mutableStateOf(-1)
     private val error = mutableStateOf<String?>(null)
     private val participants = mutableStateOf<Map<String, String?>>(emptyMap())
 
@@ -306,6 +307,31 @@ class OverlayService : Service() {
         }
     }
 
+    private fun refreshSuggestion(index: Int) {
+        val thread = selectedThread.value ?: return
+        val msgs = messages.value
+        if (msgs.isEmpty()) return
+
+        val category = when (index) {
+            0 -> "a direct reply to the most recent messages"
+            1 -> "a follow-up referencing something specific from earlier in this conversation (2 weeks to 1 month old)"
+            2 -> "a genuine personal question about their life, family, work, health, hobbies, etc."
+            else -> return
+        }
+
+        serviceScope.launch {
+            refreshingIndex.value = index
+            val result = smsRepository.suggestSingle(
+                msgs, thread.address, thread.contactName, participants.value, category
+            )
+            refreshingIndex.value = -1
+            result.fold(
+                onSuccess = { if (index < suggestions.size) suggestions[index] = it },
+                onFailure = { error.value = it.message }
+            )
+        }
+    }
+
     private fun onUseSuggestion(original: String, edited: String) {
         val thread = selectedThread.value
         // Close panel first so Google Messages is fully visible
@@ -422,11 +448,16 @@ class OverlayService : Service() {
                 }
 
                 // Suggestions
+                val currentRefreshing by refreshingIndex
                 suggestions.forEachIndexed { index, suggestion ->
                     Spacer(modifier = Modifier.height(8.dp))
-                    OverlaySuggestionCard(index, suggestion) { original, edited ->
-                        onUseSuggestion(original, edited)
-                    }
+                    OverlaySuggestionCard(
+                        index = index,
+                        suggestion = suggestion,
+                        isRefreshing = currentRefreshing == index,
+                        onRefresh = { refreshSuggestion(index) },
+                        onUse = { original, edited -> onUseSuggestion(original, edited) }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -438,6 +469,8 @@ class OverlayService : Service() {
     private fun OverlaySuggestionCard(
         index: Int,
         suggestion: String,
+        isRefreshing: Boolean,
+        onRefresh: () -> Unit,
         onUse: (original: String, edited: String) -> Unit
     ) {
         var editedText by remember(suggestion) { mutableStateOf(suggestion) }
@@ -461,18 +494,31 @@ class OverlayService : Service() {
                     value = editedText,
                     onValueChange = { editedText = it },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodySmall
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    enabled = !isRefreshing
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    IconButton(onClick = { copyToClipboard(editedText) }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.ContentCopy, "Copy", modifier = Modifier.size(18.dp))
+                    IconButton(
+                        onClick = { onRefresh() },
+                        modifier = Modifier.size(36.dp),
+                        enabled = !isRefreshing
+                    ) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Refresh, "New suggestion", modifier = Modifier.size(18.dp))
+                        }
                     }
                     Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(onClick = { onUse(suggestion, editedText) }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.Send, "Use", modifier = Modifier.size(18.dp))
+                    IconButton(
+                        onClick = { onUse(suggestion, editedText) },
+                        modifier = Modifier.size(36.dp),
+                        enabled = !isRefreshing
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "Send", modifier = Modifier.size(18.dp))
                     }
                 }
             }

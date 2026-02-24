@@ -206,6 +206,26 @@ fun SettingsScreen(
                     maxLines = 5
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ── Personal Facts ──
+                Text("About Me", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Facts about you so the AI doesn't confuse your info with your contacts'",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = state.personalFacts,
+                    onValueChange = { viewModel.updatePersonalFacts(it) },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("e.g., I'm a software engineer, married to Sarah, have 2 kids, live in Dallas, big Cowboys fan") },
+                    minLines = 3,
+                    maxLines = 6
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // ── Test ──

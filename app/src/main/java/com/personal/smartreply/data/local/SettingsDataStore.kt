@@ -22,6 +22,7 @@ class SettingsDataStore @Inject constructor(
         val API_KEY = stringPreferencesKey("api_key")
         val MODEL = stringPreferencesKey("model")
         val TONE_DESCRIPTION = stringPreferencesKey("tone_description")
+        val PERSONAL_FACTS = stringPreferencesKey("personal_facts")
     }
 
     val apiKey: Flow<String> = context.dataStore.data.map { prefs ->
@@ -36,6 +37,10 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.TONE_DESCRIPTION] ?: ""
     }
 
+    val personalFacts: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[Keys.PERSONAL_FACTS] ?: ""
+    }
+
     suspend fun setApiKey(key: String) {
         context.dataStore.edit { it[Keys.API_KEY] = key.trim() }
     }
@@ -46,5 +51,9 @@ class SettingsDataStore @Inject constructor(
 
     suspend fun setToneDescription(tone: String) {
         context.dataStore.edit { it[Keys.TONE_DESCRIPTION] = tone }
+    }
+
+    suspend fun setPersonalFacts(facts: String) {
+        context.dataStore.edit { it[Keys.PERSONAL_FACTS] = facts }
     }
 }
