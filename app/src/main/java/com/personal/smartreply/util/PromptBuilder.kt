@@ -77,14 +77,19 @@ class PromptBuilder @Inject constructor() {
         appendLine("- Suggestion 3 MUST introduce a genuinely new topic or question. Use conversation history to understand their interests and fine-tune the topic, but do NOT overtly or directly reference past conversations. It should feel like a fresh, organic topic, not a callback.")
         appendLine("- Do not include any other text, explanations, labels, or preamble. Just the 3 numbered suggestions.")
         appendLine()
-        appendLine("WRITING RULES (strict):")
-        appendLine("- NEVER use em dashes (—), en dashes (–), or double hyphens (--)")
+        appendLine("WRITING RULES (strict — violating these is a failure):")
+        appendLine("- Use all lowercase. Do NOT capitalize the first letter of the message. Do NOT capitalize words mid-sentence unless they are proper nouns (names, places).")
+        appendLine("- Do NOT end messages with a period. Texts don't end with periods. No trailing punctuation unless it's a question mark or exclamation.")
+        appendLine("- NEVER use em dashes (—), en dashes (–), double hyphens (--), or hyphens (-) to join clauses or as punctuation")
         appendLine("- NEVER use asterisks (*) for emphasis")
         appendLine("- NEVER use semicolons (;)")
         appendLine("- NEVER use ellipsis (...) unless the user's style clearly includes them")
+        appendLine("- NEVER use colons (:) to introduce lists or explanations in a text message")
         appendLine("- Avoid overusing exclamation marks — one per message max, and only if the user's style uses them")
         appendLine("- Do NOT start messages with 'Hey!' or overly enthusiastic greetings")
-        appendLine("- Do NOT use filler phrases like 'Just wanted to', 'I hope', 'I'd love to', 'Hope all is well'")
+        appendLine("- Do NOT use filler phrases like 'Just wanted to', 'I hope', 'I'd love to', 'Hope all is well', 'honestly', 'definitely', 'absolutely'")
+        appendLine("- Do NOT use formal transition words like 'however', 'moreover', 'furthermore', 'additionally', 'nevertheless'")
+        appendLine("- Do NOT use the word 'perhaps' or 'indeed' or 'quite' — nobody texts like that")
         appendLine("- Write like a real person texting, not like an AI assistant")
         appendLine("- Each suggestion MUST be ${personaEnum.maxChars} characters or fewer. Be concise.")
     }
@@ -373,16 +378,33 @@ class PromptBuilder @Inject constructor() {
     }
 
     fun sanitize(text: String): String {
-        return text
+        var result = text
             .replace("—", ", ")   // em dash
             .replace("–", ", ")   // en dash
             .replace("--", ", ")  // double hyphen
+            .replace(Regex("\\s+-\\s+"), ", ")  // hyphen used as clause separator (word - word)
             .replace(Regex("\\*+([^*]+)\\*+"), "$1")  // *bold* or **bold**
             .replace(";", ",")    // semicolons
             .replace(Regex("\\.{3,}"), "")  // ellipsis
             .replace(Regex(",\\s*,"), ",")  // double commas from replacements
             .replace(Regex("\\s{2,}"), " ") // collapse extra spaces
             .trim()
+
+        // Remove trailing period (texts don't end with periods)
+        if (result.endsWith(".")) {
+            result = result.dropLast(1).trim()
+        }
+
+        // Lowercase first character (texts don't start capitalized)
+        if (result.isNotEmpty() && result[0].isUpperCase()) {
+            // Don't lowercase if first word is a proper noun (I, name, etc.)
+            val firstWord = result.split(" ", limit = 2).first()
+            if (firstWord != "I" && firstWord != "I'm" && firstWord != "I'd" && firstWord != "I'll" && firstWord != "I've") {
+                result = result[0].lowercase() + result.substring(1)
+            }
+        }
+
+        return result
     }
 
     private fun formatGap(days: Long): String = when {

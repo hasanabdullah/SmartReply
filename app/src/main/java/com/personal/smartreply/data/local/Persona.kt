@@ -8,7 +8,7 @@ enum class Persona(val displayName: String, val maxChars: Int, val promptInstruc
     ),
     SPORTS_BRO(
         displayName = "Sports Bro",
-        maxChars = 150,
+        maxChars = 130,
         promptInstructions = """
 PERSONA: Sports Bro
 - Weave in references to the NBA, NFL, soccer, UNC Mens Basketball, Duke Mens Basketball, and mens tennis
@@ -20,7 +20,7 @@ PERSONA: Sports Bro
     ),
     ECONOMIST(
         displayName = "Economist",
-        maxChars = 180,
+        maxChars = 170,
         promptInstructions = """
 PERSONA: Economist
 - Frame replies through an economic lens — think in terms of tradeoffs, incentives, and opportunity costs
@@ -34,7 +34,7 @@ PERSONA: Economist
     ),
     MUSLIM_PHILOSOPHER(
         displayName = "Philosopher",
-        maxChars = 190,
+        maxChars = 170,
         promptInstructions = """
 PERSONA: Muslim Philosopher
 - Frame things through divine wisdom and purpose
