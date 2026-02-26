@@ -58,7 +58,7 @@ fun SuggestionCard(
             val label = when (index) {
                 0 -> "Reply"
                 1 -> "Follow-up"
-                2 -> "Personal"
+                2 -> "New Topic"
                 else -> "Suggestion ${index + 1}"
             }
             Text(

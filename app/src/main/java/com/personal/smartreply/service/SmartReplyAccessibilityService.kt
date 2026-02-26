@@ -316,6 +316,10 @@ class SmartReplyAccessibilityService : AccessibilityService() {
     }
 
     private fun matchAndActivate(title: String) {
+        // Scrape visible messages from the Google Messages UI tree
+        val scraped = scrapeVisibleMessages()
+        Log.i(TAG, "Scraped ${scraped.size} visible messages for '$title'")
+
         serviceScope.launch {
             val thread = smsRepository.getThreadByContactName(title)
             if (thread != null) {
@@ -323,7 +327,8 @@ class SmartReplyAccessibilityService : AccessibilityService() {
                 activeConversationManager.setActiveConversation(
                     ActiveConversation(
                         threadId = thread.threadId,
-                        contactName = thread.contactName
+                        contactName = thread.contactName,
+                        scrapedMessages = scraped
                     )
                 )
             } else {
@@ -331,6 +336,85 @@ class SmartReplyAccessibilityService : AccessibilityService() {
                 activeConversationManager.setActiveConversation(null)
             }
         }
+    }
+
+    /**
+     * Scrape visible messages from the Google Messages accessibility tree.
+     * Messages have resource-id ending in "message_text" and content-desc like:
+     *   "Ammi said  Ok Wednesday 2:36 PM ."
+     *   "You sent  Hey what's up Wednesday 3:00 PM ."
+     */
+    private fun scrapeVisibleMessages(): List<ScrapedMessage> {
+        val messages = mutableListOf<ScrapedMessage>()
+        try {
+            val root = rootInActiveWindow ?: return messages
+            collectMessages(root, messages)
+            root.recycle()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to scrape messages", e)
+        }
+        return messages
+    }
+
+    private fun collectMessages(node: AccessibilityNodeInfo, messages: MutableList<ScrapedMessage>) {
+        val resId = node.viewIdResourceName
+        val desc = node.contentDescription?.toString()
+        val text = node.text?.toString()
+
+        // Google Messages uses "message_text" resource ID for message content
+        if (resId != null && resId.endsWith("message_text") && desc != null && text != null) {
+            val parsed = parseMessageDesc(desc, text)
+            if (parsed != null) {
+                messages.add(parsed)
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectMessages(child, messages)
+            child.recycle()
+        }
+    }
+
+    /**
+     * Parse the content-desc of a message node.
+     * Formats observed:
+     *   "{Name} said  {text} {day/date} {time} ."
+     *   "You sent  {text} {day/date} {time} ."
+     *   "{Name} said  {text} {day/date} {time} . Loved by {Name}"
+     * We use the 'text' attribute for the actual body (more reliable).
+     */
+    private fun parseMessageDesc(desc: String, text: String): ScrapedMessage? {
+        // Extract sender and time from content-desc
+        val isFromMe = desc.startsWith("You sent") || desc.startsWith("You said")
+
+        val sender: String
+        val timeLabel: String
+
+        if (isFromMe) {
+            sender = "Me"
+        } else {
+            // "{Name} said  {text}..."
+            val saidIdx = desc.indexOf(" said ")
+            if (saidIdx < 0) return null
+            sender = desc.substring(0, saidIdx)
+        }
+
+        // Extract time: look for common day/time patterns at the end
+        // "... Wednesday 2:36 PM ." or "... 12/06/2024 2:36 PM ."
+        val timeMatch = TIME_PATTERN.find(desc)
+        timeLabel = timeMatch?.value?.trim()?.removeSuffix(".")?.trim() ?: ""
+
+        // Use the text attribute as the body (it's the clean message text)
+        val body = text.trim()
+        if (body.isBlank()) return null
+
+        return ScrapedMessage(
+            sender = sender,
+            body = body,
+            isFromMe = isFromMe,
+            timeLabel = timeLabel
+        )
     }
 
     override fun onInterrupt() {
@@ -353,6 +437,11 @@ class SmartReplyAccessibilityService : AccessibilityService() {
             "search", "settings", "start chat", "archived",
             "spam & blocked", "message organization",
             "rcs message"  // compose hint text
+        )
+
+        // Matches day/time patterns like "Wednesday 2:36 PM", "Yesterday 2:36 PM", "12/06/2024 2:36 PM"
+        private val TIME_PATTERN = Regex(
+            """(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Yesterday|Today|\d{1,2}/\d{1,2}(?:/\d{2,4})?)\s+\d{1,2}:\d{2}\s*[AP]M\s*\.?(?:\s*(?:Loved|Liked|Laughed|Emphasized|Questioned|Disliked)\s+by\s+.+)?$"""
         )
     }
 }

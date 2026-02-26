@@ -1,6 +1,7 @@
 package com.personal.smartreply.util
 
 import com.personal.smartreply.data.local.EditHistoryEntity
+import com.personal.smartreply.data.local.Persona
 import com.personal.smartreply.data.sms.SmsMessage
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -9,7 +10,7 @@ import javax.inject.Singleton
 @Singleton
 class PromptBuilder @Inject constructor() {
 
-    fun buildSystemPrompt(toneDescription: String, isGroupChat: Boolean = false, personalFacts: String = ""): String = buildString {
+    fun buildSystemPrompt(toneDescription: String, isGroupChat: Boolean = false, personalFacts: String = "", persona: String = ""): String = buildString {
         appendLine("You are a texting assistant. Your job is to suggest replies that match the user's personal texting style.")
         appendLine()
         appendLine("Style guidelines:")
@@ -37,16 +38,43 @@ class PromptBuilder @Inject constructor() {
             appendLine()
             appendLine("The user describes their texting style as: $toneDescription")
         }
+        // Inject persona instructions if active
+        val personaEnum = if (persona.isNotBlank()) {
+            try { Persona.valueOf(persona) } catch (_: Exception) { Persona.CASUAL }
+        } else Persona.CASUAL
+        if (personaEnum != Persona.CASUAL) {
+            appendLine()
+            appendLine(personaEnum.promptInstructions)
+        }
         appendLine()
         appendLine("Output format: Provide exactly 3 numbered suggestions, one per line. Each has a specific purpose:")
-        appendLine("1. [Direct reply — respond to the last 1-5 messages in the conversation]")
-        appendLine("2. [Follow-up — reference something from 2 weeks to 1 month ago in the conversation that could use a follow-up or check-in]")
-        appendLine("3. [Personal question — ask a genuine question about their life, family, work, health, hobbies, etc.]")
+        when (personaEnum) {
+            Persona.SPORTS_BRO -> {
+                appendLine("1. [Reply — respond to recent conversation context (last 15 messages if within 2 days, or last 3 messages if older), with a sports flavor or analogy woven in]")
+                appendLine("2. [Follow-up — reference something from more than 1 month ago in the conversation, tie it to a sports angle if possible]")
+                appendLine("3. [New Topic — introduce a fresh sports-related question or topic, subtly informed by their interests but NOT directly referencing past conversations]")
+            }
+            Persona.ECONOMIST -> {
+                appendLine("1. [Reply — respond to recent conversation context (last 15 messages if within 2 days, or last 3 messages if older), framed through an economic or analytical lens]")
+                appendLine("2. [Follow-up — reference something from more than 1 month ago in the conversation, consider second-order effects or tradeoffs]")
+                appendLine("3. [New Topic — introduce a fresh economy-flavored question or topic, subtly informed by their interests but NOT directly referencing past conversations]")
+            }
+            Persona.MUSLIM_PHILOSOPHER -> {
+                appendLine("1. [Reply — respond to recent conversation context (last 15 messages if within 2 days, or last 3 messages if older) with reflective wisdom and warmth]")
+                appendLine("2. [Follow-up — reference something from more than 1 month ago in the conversation, with a contemplative or purposeful angle]")
+                appendLine("3. [New Topic — introduce a fresh reflective question or topic that invites spiritual or philosophical reflection, subtly informed by their interests but NOT directly referencing past conversations]")
+            }
+            Persona.CASUAL -> {
+                appendLine("1. [Reply — respond to recent conversation context (last 15 messages if within 2 days, or last 3 messages if older)]")
+                appendLine("2. [Follow-up — reference something from more than 1 month ago in the conversation that could use a follow-up or check-in]")
+                appendLine("3. [New Topic — introduce a fresh question or topic, subtly informed by their interests but NOT directly referencing past conversations]")
+            }
+        }
         appendLine()
         appendLine("IMPORTANT:")
-        appendLine("- Suggestion 1 MUST directly address the most recent messages")
-        appendLine("- Suggestion 2 MUST reference a specific older topic from the conversation history (2 weeks to 1 month back). Look for plans they mentioned, events, problems, goals, trips, etc. If no older context exists, reference the oldest available topic.")
-        appendLine("- Suggestion 3 MUST be a thoughtful personal question that shows genuine interest")
+        appendLine("- Suggestion 1 MUST directly address recent messages. If the last 15 messages are within 2 days, use that context. If the last message is more than 2 days old, focus on the last 3 messages only.")
+        appendLine("- Suggestion 2 MUST reference a specific topic from more than 1 month ago in the conversation history. Look for plans they mentioned, events, problems, goals, trips, etc. If no context older than 1 month exists, reference the oldest available topic.")
+        appendLine("- Suggestion 3 MUST introduce a genuinely new topic or question. Use conversation history to understand their interests and fine-tune the topic, but do NOT overtly or directly reference past conversations. It should feel like a fresh, organic topic, not a callback.")
         appendLine("- Do not include any other text, explanations, labels, or preamble. Just the 3 numbered suggestions.")
         appendLine()
         appendLine("WRITING RULES (strict):")
@@ -64,7 +92,8 @@ class PromptBuilder @Inject constructor() {
         messages: List<SmsMessage>,
         contactName: String?,
         editHistory: List<EditHistoryEntity>,
-        participants: Map<String, String?> = emptyMap()
+        participants: Map<String, String?> = emptyMap(),
+        persona: String = ""
     ): String = buildString {
         val isGroup = participants.size > 1
         val displayName = if (isGroup) {
@@ -135,10 +164,32 @@ class PromptBuilder @Inject constructor() {
         }
 
         appendLine()
+        val replyPersona = if (persona.isNotBlank()) {
+            try { Persona.valueOf(persona) } catch (_: Exception) { Persona.CASUAL }
+        } else Persona.CASUAL
         appendLine("Suggest 3 replies I could send next:")
-        appendLine("1. A direct reply to the most recent messages above")
-        appendLine("2. A follow-up referencing something specific from earlier in this conversation (ideally 2 weeks to 1 month old)")
-        appendLine("3. A genuine personal question about their life, family, work, health, hobbies, etc.")
+        when (replyPersona) {
+            Persona.SPORTS_BRO -> {
+                appendLine("1. A reply to recent context (last 15 messages if within 2 days, or last 3 if older), with a sports flavor or analogy")
+                appendLine("2. A follow-up referencing something specific from more than 1 month ago in this conversation, with a sports angle")
+                appendLine("3. A fresh sports-related topic or question, subtly informed by their interests but not directly referencing past conversations")
+            }
+            Persona.ECONOMIST -> {
+                appendLine("1. A reply to recent context (last 15 messages if within 2 days, or last 3 if older), framed through an economic lens")
+                appendLine("2. A follow-up referencing something specific from more than 1 month ago, considering tradeoffs or second-order effects")
+                appendLine("3. A fresh economy-flavored topic or question, subtly informed by their interests but not directly referencing past conversations")
+            }
+            Persona.MUSLIM_PHILOSOPHER -> {
+                appendLine("1. A reply to recent context (last 15 messages if within 2 days, or last 3 if older), with reflective wisdom and warmth")
+                appendLine("2. A follow-up referencing something specific from more than 1 month ago, with a contemplative angle")
+                appendLine("3. A fresh reflective topic or question that invites spiritual or philosophical reflection, subtly informed by their interests but not directly referencing past conversations")
+            }
+            Persona.CASUAL -> {
+                appendLine("1. A reply to recent context (last 15 messages if within 2 days, or last 3 if older)")
+                appendLine("2. A follow-up referencing something specific from more than 1 month ago in this conversation")
+                appendLine("3. A fresh topic or question, subtly informed by their interests but not directly referencing past conversations")
+            }
+        }
     }
 
     fun buildSingleReplyPrompt(
@@ -146,7 +197,8 @@ class PromptBuilder @Inject constructor() {
         contactName: String?,
         editHistory: List<EditHistoryEntity>,
         participants: Map<String, String?> = emptyMap(),
-        category: String
+        category: String,
+        persona: String = ""
     ): String = buildString {
         val isGroup = participants.size > 1
         val displayName = if (isGroup) {
@@ -198,6 +250,12 @@ class PromptBuilder @Inject constructor() {
         }
 
         appendLine()
+        val singlePersona = if (persona.isNotBlank()) {
+            try { Persona.valueOf(persona) } catch (_: Exception) { Persona.CASUAL }
+        } else Persona.CASUAL
+        if (singlePersona != Persona.CASUAL) {
+            appendLine("Apply the ${singlePersona.displayName} persona to your suggestion.")
+        }
         appendLine("Suggest exactly 1 reply that is: $category")
         appendLine("Give a different suggestion than what you might have given before. Be creative.")
         appendLine("Output ONLY the suggestion text, nothing else. No numbering, no quotes, no explanation.")

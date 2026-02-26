@@ -3,6 +3,7 @@ package com.personal.smartreply.ui.screens.chat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.personal.smartreply.data.local.Persona
 import com.personal.smartreply.data.local.SettingsDataStore
 import com.personal.smartreply.data.sms.SmsMessage
 import com.personal.smartreply.repository.EditHistoryRepository
@@ -25,7 +26,8 @@ data class ChatUiState(
     val isLoadingSuggestions: Boolean = false,
     val streamingText: String = "",
     val isStreaming: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val persona: Persona = Persona.CASUAL
 )
 
 @HiltViewModel
@@ -44,6 +46,23 @@ class ChatViewModel @Inject constructor(
 
     init {
         loadMessages()
+        loadPersona()
+    }
+
+    private fun loadPersona() {
+        viewModelScope.launch {
+            settingsDataStore.persona.collect { name ->
+                val p = try { Persona.valueOf(name) } catch (_: Exception) { Persona.CASUAL }
+                _uiState.value = _uiState.value.copy(persona = p)
+            }
+        }
+    }
+
+    fun setPersona(persona: Persona) {
+        _uiState.value = _uiState.value.copy(persona = persona)
+        viewModelScope.launch {
+            settingsDataStore.setPersona(persona.name)
+        }
     }
 
     private fun loadMessages() {
@@ -85,6 +104,7 @@ class ChatViewModel @Inject constructor(
             val model = settingsDataStore.model.first()
             val tone = settingsDataStore.toneDescription.first()
             val personalFacts = settingsDataStore.personalFacts.first()
+            val persona = _uiState.value.persona.name
 
             if (apiKey.isBlank()) {
                 _uiState.value = _uiState.value.copy(
@@ -108,7 +128,8 @@ class ChatViewModel @Inject constructor(
                     apiKey = apiKey,
                     model = model,
                     tone = tone,
-                    personalFacts = personalFacts
+                    personalFacts = personalFacts,
+                    persona = persona
                 ).collect { chunk ->
                     fullText.append(chunk)
                     _uiState.value = _uiState.value.copy(streamingText = fullText.toString())

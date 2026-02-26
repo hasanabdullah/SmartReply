@@ -8,9 +8,18 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** A message scraped from the Google Messages UI via accessibility */
+data class ScrapedMessage(
+    val sender: String,   // sender name, or "Me" for outgoing
+    val body: String,
+    val isFromMe: Boolean,
+    val timeLabel: String  // e.g., "Wednesday 2:36 PM"
+)
+
 data class ActiveConversation(
     val threadId: String,
-    val contactName: String?
+    val contactName: String?,
+    val scrapedMessages: List<ScrapedMessage> = emptyList()
 )
 
 @Singleton

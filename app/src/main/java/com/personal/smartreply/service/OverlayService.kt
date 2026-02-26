@@ -18,6 +18,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +40,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +64,7 @@ import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.personal.smartreply.MainActivity
 import com.personal.smartreply.R
+import com.personal.smartreply.data.local.Persona
 import com.personal.smartreply.data.local.SettingsDataStore
 import com.personal.smartreply.data.sms.SmsMessage
 import com.personal.smartreply.data.sms.SmsThread
@@ -90,6 +94,7 @@ class OverlayService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     // Compose state
+    private val selectedPersona = mutableStateOf(Persona.CASUAL)
     private val selectedThread = mutableStateOf<SmsThread?>(null)
     private val messages = mutableStateOf<List<SmsMessage>>(emptyList())
     private val suggestions = mutableStateListOf<String>()
@@ -103,6 +108,7 @@ class OverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         composeOwner.onCreate()
         startForeground(NOTIFICATION_ID, createNotification())
+        loadPersona()
         observeActiveConversation()
     }
 
@@ -116,14 +122,33 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    // ── Persona ──────────────────────────────────────────────
+
+    private fun loadPersona() {
+        serviceScope.launch {
+            settingsDataStore.persona.collect { name ->
+                val p = try { Persona.valueOf(name) } catch (_: Exception) { Persona.CASUAL }
+                selectedPersona.value = p
+            }
+        }
+    }
+
+    private fun setPersona(persona: Persona) {
+        selectedPersona.value = persona
+        serviceScope.launch {
+            settingsDataStore.setPersona(persona.name)
+        }
+    }
+
     // ── Active conversation observer ─────────────────────────
 
     private fun observeActiveConversation() {
         serviceScope.launch {
             activeConversationManager.activeConversation.collect { conversation ->
-                Log.d(TAG, "Active conversation changed: ${conversation?.contactName ?: "null"}")
+                Log.d(TAG, "Active conversation changed: ${conversation?.contactName ?: "null"}" +
+                    " scraped=${conversation?.scrapedMessages?.size ?: 0}")
                 if (conversation != null) {
-                    loadThreadAndShow(conversation.threadId)
+                    loadThreadAndShow(conversation.threadId, conversation.scrapedMessages)
                 } else {
                     // Left the conversation — hide everything
                     Log.d(TAG, "Hiding overlay (no conversation)")
@@ -134,21 +159,58 @@ class OverlayService : Service() {
         }
     }
 
-    private fun loadThreadAndShow(threadId: String) {
-        Log.d(TAG, "loadThreadAndShow: $threadId")
+    private fun loadThreadAndShow(threadId: String, scrapedMessages: List<ScrapedMessage> = emptyList()) {
+        Log.d(TAG, "loadThreadAndShow: threadId=$threadId scraped=${scrapedMessages.size}")
         serviceScope.launch(Dispatchers.IO) {
             val allThreads = smsRepository.getThreads()
             val thread = allThreads.firstOrNull { it.threadId == threadId } ?: run {
-                Log.d(TAG, "Thread $threadId not found")
+                Log.d(TAG, "Thread $threadId not found in ${allThreads.size} threads")
                 return@launch
             }
+
+            Log.d(TAG, "Loaded thread: id=${thread.threadId} isGroup=${thread.isGroupChat} " +
+                "addresses=${thread.addresses} contactName=${thread.contactName} " +
+                "contactNames=${thread.contactNames} displayName=${thread.displayName}")
 
             // Build participant map
             val participantMap = thread.addresses.associateWith { addr ->
                 thread.contactNames.getOrNull(thread.addresses.indexOf(addr))
                     ?.takeIf { it != addr }
             }
-            val msgs = smsRepository.getMessagesWithNames(thread.threadId, participantMap)
+
+            // Load messages from SMS/MMS content provider
+            val providerMsgs = if (!thread.isGroupChat) {
+                smsRepository.getMergedMessagesForContact(thread.threadId, thread.address, participantMap)
+            } else {
+                smsRepository.getMessagesWithNames(thread.threadId, participantMap)
+            }
+
+            // If we have scraped messages from the UI, they represent the most recent
+            // conversation (including RCS which isn't in the content provider).
+            // Append them after provider messages so the AI sees the full picture.
+            val msgs = if (scrapedMessages.isNotEmpty()) {
+                val scrapedAsSms = scrapedMessages.map { scraped ->
+                    SmsMessage(
+                        id = scraped.hashCode().toLong(),
+                        threadId = threadId,
+                        address = if (scraped.isFromMe) "me" else scraped.sender,
+                        body = scraped.body,
+                        date = System.currentTimeMillis(), // recent — exact time doesn't matter for context
+                        isFromMe = scraped.isFromMe,
+                        senderName = if (scraped.isFromMe) null else scraped.sender
+                    )
+                }
+                // Use provider messages for older context, scraped for recent
+                // Take last N provider messages + all scraped messages
+                val providerOlder = providerMsgs.takeLast(50)
+                val combined = providerOlder + scrapedAsSms
+                Log.d(TAG, "Combined messages: ${providerOlder.size} from provider + ${scrapedAsSms.size} scraped = ${combined.size}")
+                combined
+            } else {
+                providerMsgs
+            }
+
+            Log.d(TAG, "Messages loaded: count=${msgs.size}, last5=${msgs.takeLast(5).map { "(${if (it.isFromMe) "me" else it.senderName ?: it.address}): ${it.body.take(30)}" }}")
 
             withContext(Dispatchers.Main) {
                 selectedThread.value = thread
@@ -285,7 +347,11 @@ class OverlayService : Service() {
             // Always re-fetch messages so we have the latest conversation
             val participantMap = participants.value
             val freshMessages = withContext(Dispatchers.IO) {
-                smsRepository.getMessagesWithNames(thread.threadId, participantMap)
+                if (!thread.isGroupChat) {
+                    smsRepository.getMergedMessagesForContact(thread.threadId, thread.address, participantMap)
+                } else {
+                    smsRepository.getMessagesWithNames(thread.threadId, participantMap)
+                }
             }
             messages.value = freshMessages
             Log.d(TAG, "Refreshed messages: count=${freshMessages.size}, latest=${freshMessages.lastOrNull()?.date}")
@@ -312,11 +378,32 @@ class OverlayService : Service() {
         val msgs = messages.value
         if (msgs.isEmpty()) return
 
-        val category = when (index) {
-            0 -> "a direct reply to the most recent messages"
-            1 -> "a follow-up referencing something specific from earlier in this conversation (2 weeks to 1 month old)"
-            2 -> "a genuine personal question about their life, family, work, health, hobbies, etc."
-            else -> return
+        val persona = selectedPersona.value
+        val category = when (persona) {
+            Persona.SPORTS_BRO -> when (index) {
+                0 -> "a reply to recent context (last 15 messages if within 2 days, or last 3 if older), with a sports flavor or analogy"
+                1 -> "a follow-up referencing something specific from more than 1 month ago in this conversation, with a sports angle"
+                2 -> "a fresh sports-related topic or question, subtly informed by their interests but not directly referencing past conversations"
+                else -> return
+            }
+            Persona.ECONOMIST -> when (index) {
+                0 -> "a reply to recent context (last 15 messages if within 2 days, or last 3 if older), framed through an economic lens"
+                1 -> "a follow-up referencing something specific from more than 1 month ago, considering tradeoffs or second-order effects"
+                2 -> "a fresh economy-flavored topic or question, subtly informed by their interests but not directly referencing past conversations"
+                else -> return
+            }
+            Persona.MUSLIM_PHILOSOPHER -> when (index) {
+                0 -> "a reply to recent context (last 15 messages if within 2 days, or last 3 if older), with reflective wisdom and warmth"
+                1 -> "a follow-up referencing something specific from more than 1 month ago, with a contemplative angle"
+                2 -> "a fresh reflective topic or question that invites spiritual or philosophical reflection, subtly informed by their interests but not directly referencing past conversations"
+                else -> return
+            }
+            Persona.CASUAL -> when (index) {
+                0 -> "a reply to recent context (last 15 messages if within 2 days, or last 3 if older)"
+                1 -> "a follow-up referencing something specific from more than 1 month ago in this conversation"
+                2 -> "a fresh topic or question, subtly informed by their interests but not directly referencing past conversations"
+                else -> return
+            }
         }
 
         serviceScope.launch {
@@ -356,6 +443,7 @@ class OverlayService : Service() {
 
     // ── Compose UI ──────────────────────────────────────────
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun PanelContent() {
         val currentThread by selectedThread
@@ -421,7 +509,26 @@ class OverlayService : Service() {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Persona selector
+                val currentPersona by selectedPersona
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Persona.entries.forEach { persona ->
+                        FilterChip(
+                            selected = currentPersona == persona,
+                            onClick = { setPersona(persona) },
+                            label = { Text(persona.displayName, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Suggest button
                 Button(
@@ -485,7 +592,7 @@ class OverlayService : Service() {
                 val label = when (index) {
                     0 -> "Reply"
                     1 -> "Follow-up"
-                    2 -> "Personal"
+                    2 -> "New Topic"
                     else -> "${index + 1}."
                 }
                 Text(label, style = MaterialTheme.typography.labelSmall,
