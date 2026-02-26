@@ -63,6 +63,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setPersona(persona.name)
         }
+        // Auto-refresh suggestions if they're already showing
+        if (_uiState.value.suggestions.isNotEmpty()) {
+            suggestReply()
+        }
     }
 
     private fun loadMessages() {

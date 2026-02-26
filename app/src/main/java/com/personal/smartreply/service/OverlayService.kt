@@ -138,6 +138,10 @@ class OverlayService : Service() {
         serviceScope.launch {
             settingsDataStore.setPersona(persona.name)
         }
+        // Auto-refresh suggestions if they're already showing
+        if (suggestions.isNotEmpty()) {
+            suggestReply()
+        }
     }
 
     // ── Active conversation observer ─────────────────────────

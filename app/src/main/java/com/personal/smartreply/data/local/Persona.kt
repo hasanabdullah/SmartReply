@@ -1,12 +1,14 @@
 package com.personal.smartreply.data.local
 
-enum class Persona(val displayName: String, val promptInstructions: String) {
+enum class Persona(val displayName: String, val maxChars: Int, val promptInstructions: String) {
     CASUAL(
         displayName = "Casual",
+        maxChars = 150,
         promptInstructions = ""
     ),
     SPORTS_BRO(
         displayName = "Sports Bro",
+        maxChars = 150,
         promptInstructions = """
 PERSONA: Sports Bro
 - Weave in references to the NBA, NFL, soccer, UNC Mens Basketball, Duke Mens Basketball, and mens tennis
@@ -18,6 +20,7 @@ PERSONA: Sports Bro
     ),
     ECONOMIST(
         displayName = "Economist",
+        maxChars = 180,
         promptInstructions = """
 PERSONA: Economist
 - Frame replies through an economic lens — think in terms of tradeoffs, incentives, and opportunity costs
@@ -31,6 +34,7 @@ PERSONA: Economist
     ),
     MUSLIM_PHILOSOPHER(
         displayName = "Philosopher",
+        maxChars = 190,
         promptInstructions = """
 PERSONA: Muslim Philosopher
 - Frame things through divine wisdom and purpose

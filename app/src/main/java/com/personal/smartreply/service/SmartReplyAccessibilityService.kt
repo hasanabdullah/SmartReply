@@ -1,6 +1,7 @@
 package com.personal.smartreply.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -9,6 +10,7 @@ import com.personal.smartreply.repository.SmsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -24,11 +26,23 @@ class SmartReplyAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDetectedTitle: String? = null
     private var observingMessages = false
+    private var matchJob: Job? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "AccessibilityService connected")
         startObservingMessages()
+        ensureOverlayServiceRunning()
+    }
+
+    private fun ensureOverlayServiceRunning() {
+        try {
+            val intent = Intent(this, OverlayService::class.java)
+            startForegroundService(intent)
+            Log.i(TAG, "Started OverlayService")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not start OverlayService", e)
+        }
     }
 
     private fun startObservingMessages() {
@@ -168,7 +182,19 @@ class SmartReplyAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 if (packageName == GOOGLE_MESSAGES_PACKAGE) {
                     activeConversationManager.setMessagesAppOpen(true)
-                    tryExtractConversationTitle(allowClear = true)
+                    // Check the class name — ConversationListActivity means we left a conversation
+                    val className = event.className?.toString() ?: ""
+                    if (className.contains("ConversationList") || className.contains("MainActivity")) {
+                        // Went back to the conversation list — clear immediately
+                        if (lastDetectedTitle != null) {
+                            Log.i(TAG, "Back to conversation list (class: $className)")
+                            matchJob?.cancel()
+                            lastDetectedTitle = null
+                            activeConversationManager.setActiveConversation(null)
+                        }
+                    } else {
+                        tryExtractConversationTitle(allowClear = true)
+                    }
                 } else {
                     if (activeConversationManager.isMessagesAppOpen.value) {
                         val root = rootInActiveWindow
@@ -178,6 +204,7 @@ class SmartReplyAccessibilityService : AccessibilityService() {
                         if (rootPkg != null && rootPkg != GOOGLE_MESSAGES_PACKAGE
                             && rootPkg != OWN_PACKAGE) {
                             Log.i(TAG, "Left Messages (now: $rootPkg)")
+                            matchJob?.cancel()
                             lastDetectedTitle = null
                             activeConversationManager.setMessagesAppOpen(false)
                         }
@@ -203,11 +230,16 @@ class SmartReplyAccessibilityService : AccessibilityService() {
 
             if (title != null && title != lastDetectedTitle) {
                 Log.i(TAG, "Conversation: '$title'")
+                // Immediately clear old conversation so overlay hides while new one loads
+                if (lastDetectedTitle != null) {
+                    activeConversationManager.setActiveConversation(null)
+                }
                 lastDetectedTitle = title
                 matchAndActivate(title)
             } else if (title == null && lastDetectedTitle != null && allowClear) {
-                // Only clear on window state changes, not content changes
+                // Left conversation view
                 Log.i(TAG, "Left conversation (was: '$lastDetectedTitle')")
+                matchJob?.cancel()
                 lastDetectedTitle = null
                 activeConversationManager.setActiveConversation(null)
             }
@@ -316,12 +348,20 @@ class SmartReplyAccessibilityService : AccessibilityService() {
     }
 
     private fun matchAndActivate(title: String) {
+        // Cancel any in-flight lookup so stale results don't overwrite current
+        matchJob?.cancel()
+
         // Scrape visible messages from the Google Messages UI tree
         val scraped = scrapeVisibleMessages()
         Log.i(TAG, "Scraped ${scraped.size} visible messages for '$title'")
 
-        serviceScope.launch {
+        matchJob = serviceScope.launch {
             val thread = smsRepository.getThreadByContactName(title)
+            // Verify the user hasn't navigated away while we were looking up
+            if (lastDetectedTitle != title) {
+                Log.i(TAG, "Title changed during lookup ('$title' -> '$lastDetectedTitle'), discarding")
+                return@launch
+            }
             if (thread != null) {
                 Log.i(TAG, "Matched thread ${thread.threadId} for '$title'")
                 activeConversationManager.setActiveConversation(

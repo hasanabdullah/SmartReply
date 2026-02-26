@@ -86,6 +86,7 @@ class PromptBuilder @Inject constructor() {
         appendLine("- Do NOT start messages with 'Hey!' or overly enthusiastic greetings")
         appendLine("- Do NOT use filler phrases like 'Just wanted to', 'I hope', 'I'd love to', 'Hope all is well'")
         appendLine("- Write like a real person texting, not like an AI assistant")
+        appendLine("- Each suggestion MUST be ${personaEnum.maxChars} characters or fewer. Be concise.")
     }
 
     fun buildReplyPrompt(
@@ -257,6 +258,7 @@ class PromptBuilder @Inject constructor() {
             appendLine("Apply the ${singlePersona.displayName} persona to your suggestion.")
         }
         appendLine("Suggest exactly 1 reply that is: $category")
+        appendLine("The suggestion MUST be ${singlePersona.maxChars} characters or fewer.")
         appendLine("Give a different suggestion than what you might have given before. Be creative.")
         appendLine("Output ONLY the suggestion text, nothing else. No numbering, no quotes, no explanation.")
     }

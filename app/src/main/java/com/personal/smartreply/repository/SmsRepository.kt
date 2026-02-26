@@ -27,9 +27,19 @@ class SmsRepository @Inject constructor(
     private val editHistoryRepository: EditHistoryRepository,
     private val promptBuilder: PromptBuilder
 ) {
+    // Cache threads for 30 seconds to avoid re-scanning 1000+ threads on every overlay action
+    @Volatile private var cachedThreads: List<SmsThread>? = null
+    @Volatile private var cacheTimestamp: Long = 0
+    private val cacheTtlMs = 30_000L
+
     fun getThreads(): List<SmsThread> {
+        val now = System.currentTimeMillis()
+        cachedThreads?.let { cached ->
+            if (now - cacheTimestamp < cacheTtlMs) return cached
+        }
+
         val threads = smsReader.getThreads()
-        return threads.map { thread ->
+        val resolved = threads.map { thread ->
             val nameMap = contactsReader.getContactNames(thread.addresses)
             val resolvedNames = thread.addresses.map { addr -> nameMap[addr] ?: addr }
             thread.copy(
@@ -37,6 +47,9 @@ class SmsRepository @Inject constructor(
                 contactNames = resolvedNames
             )
         }
+        cachedThreads = resolved
+        cacheTimestamp = now
+        return resolved
     }
 
     fun getMessages(threadId: String): List<SmsMessage> {
